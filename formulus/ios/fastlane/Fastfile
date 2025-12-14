@@ -1,0 +1,140 @@
+# This file contains the fastlane.tools configuration
+# You can find the documentation at https://docs.fastlane.tools
+#
+# For a list of all available actions, check out
+#
+#     https://docs.fastlane.tools/actions
+#
+# For a list of all available plugins, check out
+#
+#     https://docs.fastlane.tools/plugins/available-plugins
+#
+
+default_platform(:ios)
+
+platform :ios do
+  desc "Build the iOS app"
+  lane :build do |options|
+    # Increment build number if specified
+    if options[:increment_build]
+      increment_build_number(
+        build_number: options[:build_number],
+        xcodeproj: "Formulus.xcodeproj"
+      )
+    end
+
+    # Install CocoaPods dependencies
+    cocoapods(
+      podfile: "./Podfile"
+    )
+
+    # Determine if workspace exists (CocoaPods creates one)
+    workspace_path = File.exist?("Formulus.xcworkspace") ? "Formulus.xcworkspace" : nil
+    
+    # Build the app
+    build_app(
+      workspace: workspace_path,
+      project: workspace_path ? nil : "Formulus.xcodeproj",
+      scheme: "Formulus",
+      export_method: options[:export_method] || "app-store",
+      export_options: {
+        method: options[:export_method] || "app-store",
+        provisioningProfiles: {
+          ENV["BUNDLE_IDENTIFIER"] => ENV["PROVISIONING_PROFILE_NAME"]
+        }
+      },
+      output_directory: "./build",
+      output_name: "Formulus.ipa",
+      clean: true,
+      configuration: options[:configuration] || "Release"
+    )
+  end
+
+  desc "Upload to TestFlight"
+  lane :beta do |options|
+    # Build the app
+    build(
+      export_method: "app-store",
+      increment_build: options[:increment_build] || true
+    )
+
+    # Upload to TestFlight
+    upload_to_testflight(
+      skip_waiting_for_build_processing: options[:skip_waiting] || false,
+      skip_submission: options[:skip_submission] || false,
+      distribute_external: options[:distribute_external] || false,
+      groups: options[:groups] || [],
+      notify_external_testers: options[:notify_external_testers] || false
+    )
+
+    # Clean up build artifacts
+    clean_build_artifacts
+  end
+
+  desc "Upload to App Store"
+  lane :release do |options|
+    # Increment version if specified
+    if options[:increment_version]
+      increment_version_number(
+        version_number: options[:version_number],
+        xcodeproj: "Formulus.xcodeproj"
+      )
+    end
+
+    # Build the app
+    build(
+      export_method: "app-store",
+      increment_build: options[:increment_build] || true
+    )
+
+    # Upload to App Store Connect
+    upload_to_app_store(
+      skip_metadata: options[:skip_metadata] || false,
+      skip_screenshots: options[:skip_screenshots] || true,
+      skip_app_version_update: options[:skip_app_version_update] || false,
+      submit_for_review: options[:submit_for_review] || false,
+      automatic_release: options[:automatic_release] || false,
+      force: options[:force] || false
+    )
+
+    # Clean up build artifacts
+    clean_build_artifacts
+  end
+
+  desc "Run tests"
+  lane :test do
+    # Install CocoaPods dependencies
+    cocoapods(
+      podfile: "./Podfile"
+    )
+
+    # Determine if workspace exists
+    workspace_path = File.exist?("Formulus.xcworkspace") ? "Formulus.xcworkspace" : nil
+    
+    # Run tests
+    run_tests(
+      workspace: workspace_path,
+      project: workspace_path ? nil : "Formulus.xcodeproj",
+      scheme: "Formulus",
+      device: "iPhone 15",
+      clean: true
+    )
+  end
+
+  desc "Match certificates and provisioning profiles"
+  lane :match do |options|
+    match(
+      type: options[:type] || "appstore",
+      readonly: options[:readonly] || true,
+      app_identifier: ENV["BUNDLE_IDENTIFIER"] || "org.reactjs.native.example.Formulus"
+    )
+  end
+
+  desc "Setup certificates and provisioning profiles"
+  lane :setup_certificates do
+    match(
+      type: "appstore",
+      readonly: false
+    )
+  end
+end

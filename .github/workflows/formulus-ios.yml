@@ -1,0 +1,272 @@
+name: Formulus iOS Build and Release
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - 'formulus/**'
+      - '.github/workflows/formulus-ios.yml'
+  pull_request:
+    paths:
+      - 'formulus/**'
+      - '.github/workflows/formulus-ios.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        type: choice
+        options:
+          - testflight
+          - appstore
+      skip_waiting:
+        description: 'Skip waiting for TestFlight processing'
+        required: false
+        type: boolean
+        default: false
+      submit_for_review:
+        description: 'Submit for App Store review'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build-ios:
+    name: Build Formulus iOS
+    runs-on: macos-14
+    permissions:
+      contents: write
+
+    env:
+      NODE_VERSION: '18.x'
+      RUBY_VERSION: '3.2'
+      XCODE_VERSION: '15.4'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            formulus/package-lock.json
+            formulus/package.json
+
+      - name: Install npm dependencies
+        working-directory: formulus
+        run: npm ci
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+          working-directory: formulus/ios
+
+      - name: Install CocoaPods dependencies
+        working-directory: formulus/ios
+        run: |
+          pod install --repo-update
+
+      - name: Setup Fastlane
+        working-directory: formulus/ios
+        run: |
+          bundle install
+
+      - name: Setup Match (Code Signing)
+        if: github.event_name != 'pull_request'
+        working-directory: formulus/ios
+        env:
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          MATCH_GIT_BRANCH: ${{ secrets.MATCH_GIT_BRANCH || 'main' }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUNDLE_IDENTIFIER: ${{ secrets.IOS_BUNDLE_IDENTIFIER || 'org.reactjs.native.example.Formulus' }}
+        run: |
+          bundle exec fastlane match appstore readonly:true || echo "Match setup failed, continuing with manual certificates"
+
+      - name: Build iOS app (PR)
+        if: github.event_name == 'pull_request'
+        working-directory: formulus/ios
+        run: |
+          if [ -d "Formulus.xcworkspace" ]; then
+            xcodebuild -workspace Formulus.xcworkspace \
+              -scheme Formulus \
+              -configuration Debug \
+              -sdk iphonesimulator \
+              -destination 'platform=iOS Simulator,name=iPhone 15' \
+              build
+          else
+            xcodebuild -project Formulus.xcodeproj \
+              -scheme Formulus \
+              -configuration Debug \
+              -sdk iphonesimulator \
+              -destination 'platform=iOS Simulator,name=iPhone 15' \
+              build
+          fi
+
+      - name: Build iOS app (Release)
+        if: github.event_name != 'pull_request'
+        working-directory: formulus/ios
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUNDLE_IDENTIFIER: ${{ secrets.IOS_BUNDLE_IDENTIFIER || 'org.reactjs.native.example.Formulus' }}
+        run: |
+          bundle exec fastlane build export_method:app-store increment_build:true
+
+      - name: Upload build artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: formulus-ios-build-${{ github.event_name }}-${{ github.run_id }}
+          path: |
+            formulus/ios/build/*.ipa
+            formulus/ios/build/*.dSYM.zip
+
+  upload-testflight:
+    name: Upload to TestFlight
+    needs: build-ios
+    runs-on: macos-14
+    if: |
+      (github.event_name == 'release' || 
+       (github.event_name == 'workflow_dispatch' && github.event.inputs.release_type == 'testflight') ||
+       (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')))
+      && github.event_name != 'pull_request'
+    permissions:
+      contents: write
+
+    env:
+      RUBY_VERSION: '3.2'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+          working-directory: formulus/ios
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: formulus-ios-build-${{ github.event_name }}-${{ github.run_id }}
+          path: formulus/ios/build
+
+      - name: Setup Match
+        working-directory: formulus/ios
+        env:
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          MATCH_GIT_BRANCH: ${{ secrets.MATCH_GIT_BRANCH || 'main' }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUNDLE_IDENTIFIER: ${{ secrets.IOS_BUNDLE_IDENTIFIER || 'org.reactjs.native.example.Formulus' }}
+        run: |
+          bundle exec fastlane match appstore readonly:true || echo "Match setup failed"
+
+      - name: Upload to TestFlight
+        working-directory: formulus/ios
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUNDLE_IDENTIFIER: ${{ secrets.IOS_BUNDLE_IDENTIFIER || 'org.reactjs.native.example.Formulus' }}
+        run: |
+          bundle exec fastlane beta \
+            skip_waiting:${{ github.event.inputs.skip_waiting || 'false' }} \
+            skip_submission:true \
+            distribute_external:false
+
+      - name: Create GitHub Release Comment
+        if: github.event_name == 'release'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: '✅ iOS build uploaded to TestFlight successfully!'
+            })
+
+  upload-appstore:
+    name: Upload to App Store
+    needs: build-ios
+    runs-on: macos-14
+    if: |
+      (github.event_name == 'release' || 
+       (github.event_name == 'workflow_dispatch' && github.event.inputs.release_type == 'appstore'))
+      && github.event_name != 'pull_request'
+    permissions:
+      contents: write
+
+    env:
+      RUBY_VERSION: '3.2'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+          working-directory: formulus/ios
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: formulus-ios-build-${{ github.event_name }}-${{ github.run_id }}
+          path: formulus/ios/build
+
+      - name: Setup Match
+        working-directory: formulus/ios
+        env:
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          MATCH_GIT_BRANCH: ${{ secrets.MATCH_GIT_BRANCH || 'main' }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUNDLE_IDENTIFIER: ${{ secrets.IOS_BUNDLE_IDENTIFIER || 'org.reactjs.native.example.Formulus' }}
+        run: |
+          bundle exec fastlane match appstore readonly:true || echo "Match setup failed"
+
+      - name: Upload to App Store
+        working-directory: formulus/ios
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUNDLE_IDENTIFIER: ${{ secrets.IOS_BUNDLE_IDENTIFIER || 'org.reactjs.native.example.Formulus' }}
+        run: |
+          bundle exec fastlane release \
+            submit_for_review:${{ github.event.inputs.submit_for_review || 'false' }} \
+            automatic_release:false \
+            skip_metadata:true \
+            skip_screenshots:true
+
+      - name: Create GitHub Release Comment
+        if: github.event_name == 'release'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: '✅ iOS build uploaded to App Store Connect successfully!'
+            })

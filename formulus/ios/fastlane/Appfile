@@ -1,0 +1,17 @@
+# Appfile for Formulus iOS App
+# This file contains configuration for App Store Connect
+
+# App Store Connect API Key (recommended for CI/CD)
+# Set via environment variable: APP_STORE_CONNECT_API_KEY_ID, APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_KEY_CONTENT
+
+# App identifier
+app_identifier("org.reactjs.native.example.Formulus") # Update this with your actual bundle identifier
+
+# Apple Developer Team ID
+# Set via environment variable: APPLE_TEAM_ID or FASTLANE_TEAM_ID
+
+# Apple ID (for manual authentication, not recommended for CI/CD)
+# apple_id("your-apple-id@example.com")
+
+# Itunes Connect Team ID (if you have multiple teams)
+# itc_team_id("123456789")

@@ -1,0 +1,78 @@
+# Docker Compose configuration for Synkronus
+# This setup includes:
+# - Synkronus API server (running in Docker)
+# - Uses existing PostgreSQL container (subscription-manager-db)
+# - Nginx reverse proxy (optional)
+
+services:
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - synkronus
+    restart: unless-stopped
+    networks:
+      - synkronus-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # Synkronus API server
+  synkronus:
+    # Build from local source for development
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Or use pre-built image:
+    # image: ghcr.io/opendataensemble/synkronus:latest
+    expose:
+      - "8080"
+    environment:
+      PORT: "8080"
+      LOG_LEVEL: "info"
+      # Connect to existing PostgreSQL container on bridge network
+      # Using postgres superuser with known password for initial setup
+      DB_CONNECTION: "postgres://postgres:password@172.17.0.2:5432/synkronus?sslmode=disable"
+      # JWT Secret (generated for development)
+      JWT_SECRET: "dev-secret-key-change-in-production-min-32-chars-12345"
+      ADMIN_USERNAME: "admin"
+      ADMIN_PASSWORD: "admin"
+      # App bundle storage path (inside container)
+      APP_BUNDLE_PATH: "/app/data/app-bundles"
+      # Maximum number of app bundle versions to keep
+      MAX_VERSIONS_KEPT: "5"
+    volumes:
+      # Persistent volume for app bundles
+      - app-bundles:/app/data/app-bundles
+    restart: unless-stopped
+    networks:
+      - synkronus-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    # For Windows/Mac, use host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+# Named volumes for data persistence
+volumes:
+  app-bundles:
+
+# Network for services to communicate
+networks:
+  synkronus-network:
+    driver: bridge
+  default:
+    external: true
+    name: bridge
+

@@ -59,6 +59,113 @@ The workflow requires these permissions:
 
 - `GITHUB_TOKEN` - Automatically provided by GitHub Actions
 
+### Formulus Android Build
+
+**Workflow File**: `.github/workflows/formulus-android.yml`
+
+#### Triggers
+
+- **Push to `main` or `develop`**: Builds release APK
+- **Pull Requests**: Builds debug APK (validation only)
+- **Release published**: Builds and uploads to GitHub Release
+
+#### Path Filters
+
+The workflow only runs when files in these paths change:
+- `formulus/**` - Any file in the Formulus project
+- `.github/workflows/formulus-android.yml` - The workflow itself
+
+#### Build Features
+
+- **Node.js**: Uses Node.js 18.x
+- **Java**: Uses Java 17 (Temurin distribution)
+- **Signing**: Supports release signing with keystore (non-PR builds)
+- **Artifacts**: Uploads APK as GitHub Actions artifact
+
+#### Secrets Used
+
+- `FORMULUS_RELEASE_KEYSTORE_B64` - Base64-encoded keystore file
+- `FORMULUS_RELEASE_STORE_PASSWORD` - Keystore password
+- `FORMULUS_RELEASE_KEY_ALIAS` - Key alias
+- `FORMULUS_RELEASE_KEY_PASSWORD` - Key password
+
+### Formulus iOS Build and Release
+
+**Workflow File**: `.github/workflows/formulus-ios.yml`
+
+#### Triggers
+
+- **Push to `main` or `dev`**: Builds iOS app and uploads to TestFlight
+- **Pull Requests**: Builds iOS app for simulator (validation only)
+- **Release published**: Builds and uploads to TestFlight
+- **Manual Dispatch**: Allows manual triggering with release type selection
+
+#### Path Filters
+
+The workflow only runs when files in these paths change:
+- `formulus/**` - Any file in the Formulus project
+- `.github/workflows/formulus-ios.yml` - The workflow itself
+
+#### Build Features
+
+- **macOS Runner**: Uses `macos-14` for iOS builds
+- **Node.js**: Uses Node.js 18.x
+- **Ruby**: Uses Ruby 3.2 for Fastlane
+- **Xcode**: Uses Xcode 15.4
+- **Fastlane**: Automated build, signing, and upload
+- **Code Signing**: Supports Match for certificate management
+- **Artifacts**: Uploads IPA and dSYM files
+
+#### Release Types
+
+1. **TestFlight**: Uploads to TestFlight for beta testing
+2. **App Store**: Uploads to App Store Connect for production release
+
+#### Secrets Required
+
+**App Store Connect API (Recommended)**:
+- `APP_STORE_CONNECT_API_KEY_ID` - API Key ID from App Store Connect
+- `APP_STORE_CONNECT_ISSUER_ID` - Issuer ID from App Store Connect
+- `APP_STORE_CONNECT_KEY_CONTENT` - Content of the `.p8` key file
+
+**Code Signing (Match)**:
+- `MATCH_GIT_URL` - URL of Git repository for storing certificates
+- `MATCH_GIT_BASIC_AUTHORIZATION` - Base64-encoded credentials for certificates repo
+- `MATCH_GIT_BRANCH` - Branch name for certificates (default: `main`)
+
+**App Configuration**:
+- `APPLE_TEAM_ID` - Your Apple Developer Team ID
+- `IOS_BUNDLE_IDENTIFIER` - Your app's bundle identifier (optional, defaults to `org.reactjs.native.example.Formulus`)
+
+#### Manual Release Process
+
+**Upload to TestFlight**:
+1. Go to **Actions** → **Formulus iOS Build and Release**
+2. Click **Run workflow**
+3. Select branch (`main` or `dev`)
+4. Choose `testflight` as release type
+5. (Optional) Set `skip_waiting` to `true` to skip waiting for processing
+6. Click **Run workflow**
+
+**Upload to App Store**:
+1. Go to **Actions** → **Formulus iOS Build and Release**
+2. Click **Run workflow**
+3. Select branch (`main`)
+4. Choose `appstore` as release type
+5. (Optional) Set `submit_for_review` to `true` to automatically submit for review
+6. Click **Run workflow**
+
+#### Versioning
+
+- Build numbers are automatically incremented on each build
+- Version numbers can be manually specified or auto-incremented
+- Fastlane handles version management in Xcode project
+
+#### Documentation
+
+- [Fastlane Setup Guide](../formulus/ios/fastlane/README.md) - Detailed Fastlane configuration
+- [iOS App Store Setup Guide](../formulus/IOS_APP_STORE_SETUP.md) - Complete setup instructions
+
 ## Using Published Images
 
 ### Pull Latest Release
